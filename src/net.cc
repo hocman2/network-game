@@ -3,10 +3,17 @@
 #include <sys/_types/_socklen_t.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <poll.h>
 
 #define PORT 12345
 
 using namespace std;
+
+static bool net_task_running = true;
+
+void stop_net() {
+    net_task_running = false;
+}
 
 int start_host() {
     
@@ -38,18 +45,33 @@ int start_host() {
 
     struct sockaddr_in client;
     socklen_t client_len = sizeof(client);
-    int client_fd = accept(host_fd, (struct sockaddr*)&client, &client_len);
+    
+    struct pollfd incomming_poll = {
+        .fd = host_fd,
+        .events = POLLIN,
+        .revents = 0,
+    };
 
-    if (client_fd < 0) {
-        println("Failed to accept incoming connection");
-    }
+    while(net_task_running) {
+        int num_evt = poll(&incomming_poll, 1, 200);
+        if (num_evt == 0) continue;
 
-    if (send(client_fd, "Hello friend", 13, 0) < 0) {
-        println("Failed to send greetings");
-    }
+        for (int i = 0; i < num_evt; ++i) {
+            int client_fd = accept(host_fd, (struct sockaddr*)&client, &client_len);
 
-    println("Successfully sent greeting");
+            if (client_fd < 0) {
+                println("Failed to accept incoming connection");
+            }
 
+            if (send(client_fd, "Hello friend", 13, 0) < 0) {
+                println("Failed to send greetings");
+            }
+
+            println("Successfully sent greeting");
+
+        }
+   }
+    
     return 0;
 }
 

@@ -7,10 +7,12 @@
 using namespace std;
 
 int main(int argc, char* argv[]) {
-    
+
     thread net_thread;
 
-    if (argc > 1 && (strcmp(argv[1], "--host") || strcmp(argv[1], "-h"))) {
+    bool host_mode = argc > 1 && (strcmp(argv[1], "--host") || strcmp(argv[1], "-h"));
+
+    if (host_mode) {
         println("Host mode");       
         net_thread = thread(start_host); 
     } else {
@@ -18,7 +20,8 @@ int main(int argc, char* argv[]) {
         net_thread = thread(start_client); 
     }
 
-    run_game();
+    run_game(host_mode);
 
-    // need to gracefully shutdown net thread here
+    stop_net();
+    net_thread.join();
 }

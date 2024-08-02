@@ -8,6 +8,8 @@ using namespace std;
 #define WIN_WIDTH 800
 #define WIN_HEIGHT 450
 
+static bool host_mode = false;
+
 struct Entity {
     bool exists = false;
     Vector2 pos = {};
@@ -78,19 +80,23 @@ void draw_game() {
         Vector2 player_triangle[3];
         compute_player_triangle(player_triangle);
         rotate_player_triangle(player_triangle);
-        DrawTriangle(player_triangle[0], player_triangle[1], player_triangle[2], RED);
+        Color player_color = host_mode ? RED : DARKGRAY;
+        DrawTriangle(player_triangle[0], player_triangle[1], player_triangle[2], player_color);
 
 
     EndDrawing();
 }
 
-void run_game() {
-	const int screenWidth = WIN_WIDTH;
+void run_game(bool hm) {
+	host_mode = hm;
+
+    const int screenWidth = WIN_WIDTH;
     const int screenHeight = WIN_HEIGHT;
 
-    InitWindow(screenWidth, screenHeight, "raylib [core] example - basic window");
+    const char* win_name = host_mode ? "Host" : "Client";
+
+    InitWindow(screenWidth, screenHeight, win_name);
     SetTargetFPS(60);
-    SetExitKey(KEY_NULL);
 
     for (int i = 0; i < ENTITY_COUNT; ++i) {
 
