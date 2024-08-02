@@ -90,6 +90,7 @@ void run_game() {
 
     InitWindow(screenWidth, screenHeight, "raylib [core] example - basic window");
     SetTargetFPS(60);
+    SetExitKey(KEY_NULL);
 
     for (int i = 0; i < ENTITY_COUNT; ++i) {
 
