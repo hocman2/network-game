@@ -1,14 +1,14 @@
 #include "game.h"
 #include "raylib.h"
+#include <cstdint>
 #include <print>
 #include <cmath>
 #include "net.h"
 
 using namespace std;
 
-#define ENTITY_COUNT 100
-#define WIN_WIDTH 800
-#define WIN_HEIGHT 450
+const uint16_t WIN_WIDTH = 800;
+const uint16_t WIN_HEIGHT = 450;
 
 static bool host_mode = false;
 
@@ -134,11 +134,25 @@ void try_send_network_packets() {
 
     // Only send packets 1/2 time 
     if (!sent_packets) {
+
+        Vector2 entities_pos[ENTITY_COUNT];
+        bool entities_active[ENTITY_COUNT];
+
+        for (int i = 0; i < ENTITY_COUNT; ++i) {
+            entities_pos[i] = entities[i].pos;
+            entities_active[i] = entities[i].exists;
+        }
+
         GameStatePayload game_state = {
             .player_pos = {player.position.x, player.position.y},
             .player_angle = player.angle,
+            .entities_pos = {},
+            .entities_active = {},
         };
-        
+
+        memcpy(&game_state.entities_pos, entities_pos, sizeof(Vector2) * ENTITY_COUNT);
+        memcpy(&game_state.entities_active, entities_active, sizeof(bool) * ENTITY_COUNT);
+
         send_game_state(&game_state);
     }
 
@@ -148,6 +162,10 @@ void try_send_network_packets() {
 void on_state_received(GameStatePayload s) {
     player.position = { s.player_pos[0], s.player_pos[1] };
     player.angle = s.player_angle;
+    for (int i = 0; i < ENTITY_COUNT; ++i) {
+        entities[i].pos = s.entities_pos[i];
+        entities[i].exists = s.entities_active[i];
+    }
 }
 
 void run_game(bool hm) {
@@ -174,8 +192,8 @@ void run_game(bool hm) {
 
         if (host_mode) {
             process_host_inputs();
-        } else {
             process_client_inputs();
+        } else {
         } 
 
         for (int i = 0; i < ENTITY_COUNT; ++i) {

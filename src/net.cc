@@ -1,4 +1,3 @@
-#include <utility>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
@@ -7,21 +6,13 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <poll.h>
-#include "net.h"
 #include "game.h"
+#include "net.h"
 
 const uint16_t PORT = 12345;
 const uint16_t MAX_CLIENTS = 255;
 
 using namespace std;
-
-struct Client {
-    int fd = -1;
-};
-
-struct Host {
-    int fd = -1;
-};
 
 static bool net_task_running = true;
 
