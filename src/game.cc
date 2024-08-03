@@ -10,8 +10,6 @@ using namespace std;
 const uint16_t WIN_WIDTH = 800;
 const uint16_t WIN_HEIGHT = 450;
 
-static bool host_mode = false;
-
 struct Entity {
     bool exists = false;
     Vector2 pos = {};
@@ -60,7 +58,7 @@ void rotate_player_triangle(Vector2 player_triangle[3]) {
     }
 }
 
-void draw_game() {
+void draw_game(bool host_mode) {
     BeginDrawing();
     {
         ClearBackground(RAYWHITE);
@@ -168,8 +166,37 @@ void on_state_received(GameStatePayload s) {
     }
 }
 
-void run_game(bool hm) {
-	host_mode = hm;
+void host_init() {
+    for (int i = 0; i < ENTITY_COUNT; ++i) {
+        entities[i].pos.x = GetRandomValue(0, WIN_WIDTH);
+        entities[i].pos.y = GetRandomValue(0, WIN_HEIGHT);
+        entities[i].dir_x = i % 2 == 0 ? 1 : -1;
+        entities[i].dir_y = i % 2 == 0 ? -1 : 1;
+    }
+}
+
+void host_update(float dt) {
+    process_host_inputs();
+
+    for (int i = 0; i < ENTITY_COUNT; ++i) {
+            
+        if (!entities[i].exists) continue;
+
+        entities[i].pos.x += ceil((int)(entities[i].dir_x * 200.f * dt));
+        entities[i].pos.y += ceil((int)(entities[i].dir_y * 200.f * dt));
+
+        if (entities[i].pos.x >= 800 || entities[i].pos.x <= 0) { entities[i].dir_x *= -1; }
+        if (entities[i].pos.y >= 450 || entities[i].pos.y <= 0) { entities[i].dir_y *= -1; }           
+    }
+ 
+    try_send_network_packets();
+}
+
+void client_update(float _dt) {
+    process_client_inputs();
+}
+
+void run_game(bool host_mode) {
 
     const int screenWidth = WIN_WIDTH;
     const int screenHeight = WIN_HEIGHT;
@@ -179,39 +206,19 @@ void run_game(bool hm) {
     InitWindow(screenWidth, screenHeight, win_name);
     SetTargetFPS(60);
 
-    for (int i = 0; i < ENTITY_COUNT; ++i) {
-        entities[i].pos.x = GetRandomValue(0, WIN_WIDTH);
-        entities[i].pos.y = GetRandomValue(0, WIN_HEIGHT);
-        entities[i].dir_x = i % 2 == 0 ? 1 : -1;
-        entities[i].dir_y = i % 2 == 0 ? -1 : 1;
-    }
+    if (host_mode) { host_init(); }    
 
     while (!WindowShouldClose())
     {
         float dt = GetFrameTime();
 
         if (host_mode) {
-            process_host_inputs();
-            process_client_inputs();
+            host_update(dt);
         } else {
+            client_update(dt);
         } 
 
-        for (int i = 0; i < ENTITY_COUNT; ++i) {
-            
-            if (!entities[i].exists) continue;
-
-            entities[i].pos.x += ceil((int)(entities[i].dir_x * 200.f * dt));
-            entities[i].pos.y += ceil((int)(entities[i].dir_y * 200.f * dt));
-
-            if (entities[i].pos.x >= 800 || entities[i].pos.x <= 0) { entities[i].dir_x *= -1; }
-            if (entities[i].pos.y >= 450 || entities[i].pos.y <= 0) { entities[i].dir_y *= -1; }           
-        }
-        
-        if (host_mode) {
-            try_send_network_packets();
-        }
-
-        draw_game();
+        draw_game(host_mode);
     }
 
     CloseWindow();
