@@ -1,6 +1,8 @@
+#include "game.h"
 #include "raylib.h"
 #include <print>
 #include <cmath>
+#include "net.h"
 
 using namespace std;
 
@@ -60,6 +62,7 @@ void rotate_player_triangle(Vector2 player_triangle[3]) {
 
 void draw_game() {
     BeginDrawing();
+    {
         ClearBackground(RAYWHITE);
 
        // Draw entts
@@ -82,9 +85,69 @@ void draw_game() {
         rotate_player_triangle(player_triangle);
         Color player_color = host_mode ? RED : DARKGRAY;
         DrawTriangle(player_triangle[0], player_triangle[1], player_triangle[2], player_color);
-
-
+    }
     EndDrawing();
+}
+
+void process_client_inputs() {
+    if (IsKeyPressed(KEY_SPACE)) {
+        // Spawn an entity
+        for (int i = 0; i < ENTITY_COUNT; ++i) {
+            if (!entities[i].exists) {
+                entities[i].exists = true;
+                break;
+            }
+        }
+    }
+}
+
+void process_host_inputs() {
+    float dt = GetFrameTime();
+
+    if (IsKeyDown(KEY_RIGHT)) {
+        player.angle += (3.f * dt);
+        while (player.angle > 6.28f) { player.angle = 0.f + (player.angle - 6.28f); }
+    } else if (IsKeyDown(KEY_LEFT)) {
+        player.angle -= (3.f * dt);
+        while (player.angle < 0.f) { player.angle += 6.28f; }
+    }
+
+    if (IsKeyDown(KEY_UP)) {
+        Vector2 direction = {
+            -sinf(player.angle),
+            cosf(player.angle)
+        };
+
+        player.position.x += ceil((int)(direction.x * 200.f * dt));
+        player.position.y += ceil((int)(direction.y * 200.f * dt));
+
+        if (player.position.x > WIN_WIDTH) { player.position.x = WIN_WIDTH; }
+        else if (player.position.x < 0) { player.position.x = 0; }
+
+        if (player.position.y > WIN_HEIGHT) { player.position.y = WIN_HEIGHT; }
+        else if (player.position.y < 0) { player.position.y = 0; }
+    }
+}
+
+void try_send_network_packets() {
+    static bool sent_packets = false;
+
+    // Only send packets 1/2 time 
+    if (!sent_packets) {
+        GameStatePayload game_state = {
+            .player_pos = {player.position.x, player.position.y},
+            .player_angle = player.angle,
+        };
+        
+        send_game_state(&game_state);
+    }
+
+    sent_packets = !sent_packets;
+}
+
+void on_state_received(GameStatePayload s) {
+    player.position = { s.player_pos[0], s.player_pos[1] };
+    player.angle = s.player_angle;
 }
 
 void run_game(bool hm) {
@@ -99,7 +162,6 @@ void run_game(bool hm) {
     SetTargetFPS(60);
 
     for (int i = 0; i < ENTITY_COUNT; ++i) {
-
         entities[i].pos.x = GetRandomValue(0, WIN_WIDTH);
         entities[i].pos.y = GetRandomValue(0, WIN_HEIGHT);
         entities[i].dir_x = i % 2 == 0 ? 1 : -1;
@@ -110,39 +172,11 @@ void run_game(bool hm) {
     {
         float dt = GetFrameTime();
 
-        if (IsKeyDown(KEY_RIGHT)) {
-            player.angle += (3.f * dt);
-            while (player.angle > 6.28f) { player.angle = 0.f + (player.angle - 6.28f); }
-        } else if (IsKeyDown(KEY_LEFT)) {
-            player.angle -= (3.f * dt);
-            while (player.angle < 0.f) { player.angle += 6.28f; }
-        }
-
-        if (IsKeyDown(KEY_UP)) {
-            Vector2 direction = {
-                -sinf(player.angle),
-                cosf(player.angle)
-            };
-
-            player.position.x += ceil((int)(direction.x * 200.f * dt));
-            player.position.y += ceil((int)(direction.y * 200.f * dt));
-
-            if (player.position.x > WIN_WIDTH) { player.position.x = WIN_WIDTH; }
-            else if (player.position.x < 0) { player.position.x = 0; }
-
-            if (player.position.y > WIN_HEIGHT) { player.position.y = WIN_HEIGHT; }
-            else if (player.position.y < 0) { player.position.y = 0; }
-        }
-        
-        if (IsKeyPressed(KEY_SPACE)) {
-            // Spawn an entity
-            for (int i = 0; i < ENTITY_COUNT; ++i) {
-                if (!entities[i].exists) {
-                    entities[i].exists = true;
-                    break;
-                }
-            }
-        }
+        if (host_mode) {
+            process_host_inputs();
+        } else {
+            process_client_inputs();
+        } 
 
         for (int i = 0; i < ENTITY_COUNT; ++i) {
             
@@ -153,6 +187,10 @@ void run_game(bool hm) {
 
             if (entities[i].pos.x >= 800 || entities[i].pos.x <= 0) { entities[i].dir_x *= -1; }
             if (entities[i].pos.y >= 450 || entities[i].pos.y <= 0) { entities[i].dir_y *= -1; }           
+        }
+        
+        if (host_mode) {
+            try_send_network_packets();
         }
 
         draw_game();
