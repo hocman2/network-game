@@ -16,12 +16,14 @@ const uint16_t WIN_HEIGHT = 400;
 const float PACKET_SEND_INTERVAL_MS = 1.f / 10.f;
 const size_t MAX_BUFFERED_STATES = 2;
 
+enum class EntityState {No = 0, Ghost, ServerHandled};
+
 struct Entity {
     uint16_t id;
-    bool exists = false;
+    EntityState state = EntityState::No;
     Vector2 pos = {};
-    int dir_x = 1;
-    int dir_y = 1;
+    float dir_x = 0.f;
+    float dir_y = 0.f;
 };
 
 struct Player {
@@ -75,7 +77,7 @@ void draw_game(bool host_mode) {
         // Draw entts
         for (int i = 0; i < ENTITY_COUNT; ++i) {
 
-            if (!entities[i].exists) continue;
+            if (entities[i].state == EntityState::No) continue;
 
             Color color = ColorFromHSV((float)i * 360.f / (float)ENTITY_COUNT,
                                  (float)i * 0.4f / (float)ENTITY_COUNT + 0.2f,
@@ -102,7 +104,31 @@ void draw_game(bool host_mode) {
 
 void process_client_inputs() {
     if (IsKeyPressed(KEY_SPACE)) {
-        send_network_message();
+        Vector2 mp = GetMousePosition();
+        Vector2 dir = {(float)GetRandomValue(-10, 10), (float)GetRandomValue(-10, 10)};
+        dir = Vector2Normalize(dir);
+
+        print_vec2(dir);
+
+        int first_available_id = -1;
+        for (size_t i = 0; i < ENTITY_COUNT; ++i) {
+            if (entities[i].state != EntityState::No) continue;
+            entities[i].state = EntityState::Ghost;
+            entities[i].pos = mp;
+            entities[i].dir_x = dir.x;
+            entities[i].dir_y = dir.y;
+
+            first_available_id = entities[i].id;
+            break;
+        }
+
+        if (first_available_id == -1) return;
+
+        send_network_message({
+            .id = static_cast<uint16_t>(first_available_id),
+            .pos = mp,
+            .dir = dir,
+        });
     }
 }
 
@@ -150,13 +176,13 @@ void try_send_network_packets(float dt) {
         // Redundant probably
         uint32_t num_active_entities = 0;
         for (int i = 0; i < ENTITY_COUNT; ++i) {
-            if (entities[i].exists) ++num_active_entities;
+            if (entities[i].state != EntityState::No) ++num_active_entities;
         }
         
         unique_ptr<EntityPayload[]> active_entities(new EntityPayload[num_active_entities]);
 
         for (int i = 0; i < ENTITY_COUNT; ++i) {
-            if (entities[i].exists) {
+            if (entities[i].state != EntityState::No) {
                 active_entities[i].id = entities[i].id;
                 active_entities[i].pos = entities[i].pos;
             }
@@ -190,12 +216,12 @@ void interp_to_game_state(const GameStatePayload& s, float dt) {
         for (int j = 0; j < ENTITY_COUNT; ++j) {
             if (entities[j].id != received_entity.id) continue;
            
-            if (entities[j].exists) {
+            if (entities[j].state == EntityState::ServerHandled) {
                 entities[j].pos.x = Lerp(entities[j].pos.x, received_entity.pos.x, inv_num_fr_per_packets);
                 entities[j].pos.y = Lerp(entities[j].pos.y, received_entity.pos.y, inv_num_fr_per_packets);
             } else {
                 entities[j].pos = received_entity.pos;
-                entities[j].exists = true;
+                entities[j].state = EntityState::ServerHandled;
             }
 
             break;
@@ -212,7 +238,7 @@ void apply_game_state(const GameStatePayload& s) {
         for (uint32_t j = 0; j < ENTITY_COUNT; ++j) {
             if (entities[j].id != received_entity.id) continue;
 
-            entities[j].exists = true;
+            entities[j].state = EntityState::ServerHandled;
             entities[j].pos = received_entity.pos;
         }
     }
@@ -229,6 +255,30 @@ void on_state_received(GameStatePayload &&s) {
     buffered_states.push(std::move(s));
 
     buffered_states_mtx.unlock();
+}
+
+void on_entity_spawned(const SpawnEntityPayload& p) {
+    for (size_t i = 0; i < ENTITY_COUNT; ++i) {
+        if (entities[i].id != p.id) continue;
+
+        entities[i].state = EntityState::ServerHandled;
+        entities[i].pos = p.pos;
+        entities[i].dir_x = p.dir.x;
+        entities[i].dir_y = p.dir.y;
+        break;
+    }
+}
+
+void entity_update(Entity& entity, float dt) {
+    entity.pos.x += ceil((int)(entity.dir_x * 200.f * dt));
+    entity.pos.y += ceil((int)(entity.dir_y * 200.f * dt));
+
+    if (entity.pos.x >= WIN_WIDTH || entity.pos.x <= 0) {
+        entity.dir_x *= -1;
+    }
+    if (entity.pos.y >= WIN_HEIGHT || entity.pos.y <= 0) {
+        entity.dir_y *= -1;
+    }
 }
 
 void common_init() {
@@ -252,17 +302,9 @@ void host_update(float dt) {
 
     for (int i = 0; i < ENTITY_COUNT; ++i) {
 
-        if (!entities[i].exists) continue;
-
-        entities[i].pos.x += ceil((int)(entities[i].dir_x * 200.f * dt));
-        entities[i].pos.y += ceil((int)(entities[i].dir_y * 200.f * dt));
-
-        if (entities[i].pos.x >= WIN_WIDTH || entities[i].pos.x <= 0) {
-            entities[i].dir_x *= -1;
-        }
-        if (entities[i].pos.y >= WIN_HEIGHT || entities[i].pos.y <= 0) {
-            entities[i].dir_y *= -1;
-        }
+        if (entities[i].state == EntityState::No) continue;
+        
+        entity_update(entities[i], dt);
     }
 
     try_send_network_packets(dt);
@@ -280,6 +322,13 @@ void client_update(float dt) {
         interp_to_game_state(target_state, dt);
 #endif
         buffered_states_mtx.unlock();
+
+        // Client is tasked to update entities that haven't been server acknowledged yet
+        for (size_t i = 0; i < ENTITY_COUNT; ++i) {
+            if (entities[i].state == EntityState::Ghost) {
+                entity_update(entities[i], dt);
+            }
+        }
     }
 }
 

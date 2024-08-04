@@ -18,6 +18,14 @@ struct GameStatePayload {
     std::unique_ptr<EntityPayload[]> entities = nullptr;
 };
 
+struct SpawnEntityPayload {
+    //WARN: ideally the client should warn the server which ID it used to spawn the entity
+    // but the server should respond with which actual ID it used and the client should sync to it, this is not handled here
+    uint16_t id = 0;
+    Vector2 pos = {0.f, 0.f};
+    Vector2 dir = {0.f, 0.f};
+};
+
 struct Client {
     int fd = -1;
 };
@@ -33,5 +41,5 @@ int run_client();
  */
 void stop_net();
 
-void send_network_message(void);
+void send_network_message(const struct SpawnEntityPayload& payload);
 void dispatch_game_state(const struct GameStatePayload& game_state);

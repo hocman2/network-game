@@ -72,6 +72,10 @@ void deserialize_game_state(char* msg, size_t msg_len, GameStatePayload& game_st
     }
 }
 
+void deserialize_spawn_entity(char* msg, size_t msg_len, SpawnEntityPayload& payload) {
+    memcpy(&payload, msg, msg_len);
+}
+
 void poll_new_connections(struct pollfd* incoming_poll, struct pollfd client_evt_listeners[MAX_CLIENTS]) {
     struct sockaddr_in client;
     socklen_t client_len = sizeof(client);
@@ -116,7 +120,10 @@ void poll_client_messages(struct pollfd client_evt_listeners[MAX_CLIENTS]) {
 
         if (client_poll.revents == POLLIN) {
             int msg_len = recv(client_poll.fd,  buff, sizeof buff, 0);
-            println("{}", buff);
+            
+            SpawnEntityPayload payload;
+            deserialize_spawn_entity(buff, msg_len, payload);
+            on_entity_spawned(payload);
         } else if (client_poll.revents == POLLOUT) {
             --num_clients;
             // replace last client with this one 
@@ -213,8 +220,10 @@ int run_client() {
     return 0;
 }
 
-void send_network_message(void) {
-    send(host.fd, "I HAVE A MESSAGE FOR YOU!", 30, 0);
+void send_network_message(const SpawnEntityPayload& payload) {
+    if (send(host.fd, &payload, sizeof(SpawnEntityPayload), 0) < 0) {
+        println("Failed to send message to the server");
+    }
 }
 
 void dispatch_game_state(const GameStatePayload& game_state) {
