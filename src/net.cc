@@ -156,7 +156,7 @@ int start_client() {
 
     char buff[2048];
     while(net_task_running) {
-        int msg_len = recv(server_fd, &buff, 2048, 0);
+        int msg_len = recv(server_fd, &buff, sizeof(buff), 0);
         if (msg_len < 0) {
             println("Failed to read from server");
             return -1;
@@ -172,7 +172,7 @@ int start_client() {
 
 void send_game_state(const GameStatePayload& game_state) {
     char buff[2048];
-    size_t serialized_len = serialize_game_state(buff, 2048, game_state);
+    size_t serialized_len = serialize_game_state(buff, sizeof(buff), game_state);
 
     for (int i = 0; i < num_clients; ++i) {
         int fd = clients[i].fd;

@@ -197,7 +197,6 @@ void common_init() {
 
 void host_init() {
     for (int i = 0; i < ENTITY_COUNT; ++i) {
-        entities[i].id = i;
         entities[i].pos.x = GetRandomValue(0, WIN_WIDTH);
         entities[i].pos.y = GetRandomValue(0, WIN_HEIGHT);
         entities[i].dir_x = i % 2 == 0 ? 1 : -1;
@@ -249,7 +248,7 @@ void run_game(bool host_mode) {
         float dt = GetFrameTime();
 
         if (host_mode) {
-        host_update(dt);
+            host_update(dt);
         } else {
             client_update(dt);
         }
