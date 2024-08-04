@@ -12,6 +12,7 @@ struct EntityPayload {
 };
 
 struct GameStatePayload {
+    uint64_t server_command_frame = 0;
     float player_pos[2] {0.f, 0.f};
     float player_angle = 0.f;
     uint32_t num_entities = 0;
@@ -19,6 +20,7 @@ struct GameStatePayload {
 };
 
 struct SpawnEntityPayload {
+    uint64_t command_frame = 0;
     //WARN: ideally the client should warn the server which ID it used to spawn the entity
     // but the server should respond with which actual ID it used and the client should sync to it, this is not handled here
     uint16_t id = 0;

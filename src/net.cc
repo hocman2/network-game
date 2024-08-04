@@ -32,8 +32,11 @@ size_t serialize_game_state(char* buff, size_t buff_len, const GameStatePayload&
     assert(buff_len > sizeof payload && format("Provided buffer length is guaranteed to not fit a minimal game state payload. {} {}", __FILE__, __LINE__).c_str());
 
     size_t offset = 0;
+    memcpy(buff + offset, &payload.server_command_frame, sizeof payload.server_command_frame);
+    offset = sizeof payload.server_command_frame;
+
     memcpy(buff + offset, &payload.player_pos, sizeof payload.player_pos);
-    offset = sizeof payload.player_pos;
+    offset += sizeof payload.player_pos;
 
     memcpy(buff + offset, &payload.player_angle, sizeof payload.player_angle);
     offset += sizeof payload.player_angle;
@@ -53,7 +56,10 @@ size_t serialize_game_state(char* buff, size_t buff_len, const GameStatePayload&
 
 void deserialize_game_state(char* msg, size_t msg_len, GameStatePayload& game_state) {
     size_t offset = 0;
-    memcpy(&game_state.player_pos, msg, sizeof game_state.player_pos);
+    memcpy(&game_state.server_command_frame, msg + offset, sizeof game_state.server_command_frame);
+    offset += sizeof game_state.server_command_frame;
+
+    memcpy(&game_state.player_pos, msg + offset, sizeof game_state.player_pos);
     offset += sizeof game_state.player_pos;
 
     memcpy(&game_state.player_angle, msg + offset, sizeof game_state.player_angle);
@@ -80,7 +86,7 @@ void poll_new_connections(struct pollfd* incoming_poll, struct pollfd client_evt
     struct sockaddr_in client;
     socklen_t client_len = sizeof(client);
 
-    int num_evt = poll(incoming_poll, 1, 200);
+    int num_evt = poll(incoming_poll, 1, 0);
     if (num_evt == 0) return;
 
     for (int i = 0; i < num_evt; ++i) {
