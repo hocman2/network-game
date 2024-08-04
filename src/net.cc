@@ -72,7 +72,62 @@ void deserialize_game_state(char* msg, size_t msg_len, GameStatePayload& game_st
     }
 }
 
-int start_host() {
+void poll_new_connections(struct pollfd* incoming_poll, struct pollfd client_evt_listeners[MAX_CLIENTS]) {
+    struct sockaddr_in client;
+    socklen_t client_len = sizeof(client);
+
+    int num_evt = poll(incoming_poll, 1, 200);
+    if (num_evt == 0) return;
+
+    for (int i = 0; i < num_evt; ++i) {
+        int client_fd = accept(incoming_poll->fd, (struct sockaddr*)&client, &client_len);
+
+        if (client_fd < 0) {
+            println("Failed to accept incoming connection");
+            continue;
+        }
+        
+        if (num_clients >= MAX_CLIENTS) {
+            // send a message to the client to inform him we are full
+        } else {
+            clients[num_clients] = {
+                .fd = client_fd,
+            };
+
+            client_evt_listeners[num_clients++] = {
+                .fd = client_fd,
+                .events = POLLIN,
+                .revents = 0,
+            };
+        }
+    }
+}
+
+void poll_client_messages(struct pollfd client_evt_listeners[MAX_CLIENTS]) {
+    int n_evts = poll(client_evt_listeners, num_clients, 0);
+    if (n_evts == 0) return;
+
+    char buff[2048];
+    for (uint16_t i = 0; i < num_clients; ++i) {
+    repeat:
+        struct pollfd& client_poll = client_evt_listeners[i];
+
+        if (!client_poll.revents) continue;
+
+        if (client_poll.revents == POLLIN) {
+            int msg_len = recv(client_poll.fd,  buff, sizeof buff, 0);
+            println("{}", buff);
+        } else if (client_poll.revents == POLLOUT) {
+            --num_clients;
+            // replace last client with this one 
+            client_evt_listeners[i] = client_evt_listeners[num_clients+1];
+            // repeat this iteration otherwise that moved client won't get processed due to num_clients being decremented
+            goto repeat;
+        }
+    }
+}
+
+int run_host() {
  
     int host_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (host_fd < 0) {
@@ -104,40 +159,24 @@ int start_host() {
 
     println("Listening on port {}", PORT);
 
-    struct sockaddr_in client;
-    socklen_t client_len = sizeof(client);
-    
+        
     struct pollfd incoming_poll = {
         .fd = host_fd,
         .events = POLLIN,
         .revents = 0,
     };
 
+    struct pollfd client_evt_listeners[MAX_CLIENTS];
+
     while(net_task_running) {
-        int num_evt = poll(&incoming_poll, 1, 200);
-        if (num_evt == 0) continue;
-
-        for (int i = 0; i < num_evt; ++i) {
-            int client_fd = accept(host_fd, (struct sockaddr*)&client, &client_len);
-
-            if (client_fd < 0) {
-                println("Failed to accept incoming connection");
-            }
-            
-            if (num_clients >= MAX_CLIENTS) {
-                send(client_fd, "Max client reached", 19, 0);
-            } else {
-                clients[num_clients++] = {
-                    .fd = client_fd,
-                };
-            }
-        }
-   }
+        poll_new_connections(&incoming_poll, client_evt_listeners);    
+        poll_client_messages(client_evt_listeners);
+    }
     
     return 0;
 }
 
-int start_client() {
+int run_client() {
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
         println("Failed to create socket");
@@ -153,6 +192,10 @@ int start_client() {
         println("Failed to connect to server");
         return -1;
     }
+    
+    host = {
+        .fd = server_fd,
+    };
 
     char buff[2048];
     while(net_task_running) {
@@ -170,7 +213,11 @@ int start_client() {
     return 0;
 }
 
-void send_game_state(const GameStatePayload& game_state) {
+void send_network_message(void) {
+    send(host.fd, "I HAVE A MESSAGE FOR YOU!", 30, 0);
+}
+
+void dispatch_game_state(const GameStatePayload& game_state) {
     char buff[2048];
     size_t serialized_len = serialize_game_state(buff, sizeof(buff), game_state);
 

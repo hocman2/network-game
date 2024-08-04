@@ -102,13 +102,7 @@ void draw_game(bool host_mode) {
 
 void process_client_inputs() {
     if (IsKeyPressed(KEY_SPACE)) {
-        // Spawn an entity
-        for (int i = 0; i < ENTITY_COUNT; ++i) {
-            if (!entities[i].exists) {
-                entities[i].exists = true;
-                break;
-            }
-        }
+        send_network_message();
     }
 }
 
@@ -175,7 +169,7 @@ void try_send_network_packets(float dt) {
             .entities = std::move(active_entities),
         };
 
-        send_game_state(game_state);
+        dispatch_game_state(game_state);
         time_before_sending = PACKET_SEND_INTERVAL_MS;
     }
 }
@@ -255,7 +249,6 @@ void host_init() {
 
 void host_update(float dt) {
     process_host_inputs();
-    process_client_inputs();
 
     for (int i = 0; i < ENTITY_COUNT; ++i) {
 

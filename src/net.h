@@ -26,12 +26,12 @@ struct Host {
     int fd = -1;
 };
 
-int start_host();
-int start_client();
+int run_host();
+int run_client();
 /*
  * Schedules the net function to stop in a bit. The thread to runs it can be joined to end the program 
  */
 void stop_net();
 
-
-void send_game_state(const struct GameStatePayload& game_state);
+void send_network_message(void);
+void dispatch_game_state(const struct GameStatePayload& game_state);

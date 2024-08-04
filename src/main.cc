@@ -14,10 +14,10 @@ int main(int argc, char* argv[]) {
 
     if (host_mode) {
         println("Host mode");       
-        net_thread = thread(start_host); 
+        net_thread = thread(run_host); 
     } else {
         println("Client mode");
-        net_thread = thread(start_client); 
+        net_thread = thread(run_client); 
     }
 
     run_game(host_mode);
