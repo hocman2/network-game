@@ -1,15 +1,20 @@
 #include "game.h"
 #include "net.h"
 #include "raylib.h"
+#include "raymath.h"
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <print>
+#include <queue>
 
 using namespace std;
 
-const uint16_t WIN_WIDTH = 800;
-const uint16_t WIN_HEIGHT = 450;
+const uint16_t WIN_WIDTH = 700;
+const uint16_t WIN_HEIGHT = 400;
+const float PACKET_SEND_INTERVAL_MS = 1.f / 10.f;
+const size_t MAX_BUFFERED_STATES = 2;
 
 struct Entity {
     uint16_t id;
@@ -20,12 +25,15 @@ struct Entity {
 };
 
 struct Player {
-    Vector2 position = {400, 225};
+    Vector2 position = {(int)(WIN_WIDTH/2), (int)(WIN_HEIGHT/2)};
     float angle = 0.f;
 };
 
 Player player;
 Entity entities[ENTITY_COUNT];
+
+queue<GameStatePayload> buffered_states;
+mutex buffered_states_mtx;
 
 void print_vec2(const Vector2 &vec) { println("x: {}; y: {}", vec.x, vec.y); }
 
@@ -85,6 +93,9 @@ void draw_game(bool host_mode) {
                  player_color);
 
         DrawFPS(10, 10);
+#ifdef NO_NET_INTERP
+        DrawText("Running without net interpolation", 10, 25, 16, RED);
+#endif
     }
     EndDrawing();
 }
@@ -136,11 +147,11 @@ void process_host_inputs() {
     }
 }
 
-void try_send_network_packets() {
-    static bool sent_packets = false;
+void try_send_network_packets(float dt) {
+    static float time_before_sending = PACKET_SEND_INTERVAL_MS;
+    time_before_sending -= dt;
 
-    // Only send packets 1/2 time
-    if (!sent_packets) {
+    if (time_before_sending <= 0.f) {
     
         // Redundant probably
         uint32_t num_active_entities = 0;
@@ -165,27 +176,65 @@ void try_send_network_packets() {
         };
 
         send_game_state(game_state);
+        time_before_sending = PACKET_SEND_INTERVAL_MS;
     }
-
-    sent_packets = !sent_packets;
 }
 
-void on_state_received(GameStatePayload &&s) {
-    player.position = {s.player_pos[0], s.player_pos[1]};
-    player.angle = s.player_angle;
-  
+void interp_to_game_state(const GameStatePayload& s, float dt) {
+    int num_fr_per_packets = ceil(1.f / (dt / PACKET_SEND_INTERVAL_MS));
+    float inv_num_fr_per_packets = 1.f / (float)num_fr_per_packets;
+
+    player.position.x = Lerp(player.position.x, s.player_pos[0], inv_num_fr_per_packets);
+    player.position.y = Lerp(player.position.y, s.player_pos[1], inv_num_fr_per_packets);
+
+    // Note that this causes a small visual glitch under certain circumstances because we are not always lerping the shortest path
+    player.angle = Lerp(player.angle, s.player_angle, inv_num_fr_per_packets);
+
     // Unoptimized, ugly, hashmap by id woudl be better
     for (uint32_t i = 0; i < s.num_entities; ++i) {
         EntityPayload& received_entity = s.entities[i];
         for (int j = 0; j < ENTITY_COUNT; ++j) {
             if (entities[j].id != received_entity.id) continue;
-            
-            // Make alive if it wasn't bcause it sure is now
-            entities[j].exists = true;
-            entities[j].pos = received_entity.pos;
+           
+            if (entities[j].exists) {
+                entities[j].pos.x = Lerp(entities[j].pos.x, received_entity.pos.x, inv_num_fr_per_packets);
+                entities[j].pos.y = Lerp(entities[j].pos.y, received_entity.pos.y, inv_num_fr_per_packets);
+            } else {
+                entities[j].pos = received_entity.pos;
+                entities[j].exists = true;
+            }
+
             break;
         }
     }
+}
+
+void apply_game_state(const GameStatePayload& s) {
+    player.position = {s.player_pos[0], s.player_pos[1]};
+    player.angle = s.player_angle;
+
+    for (uint32_t i = 0; i < s.num_entities; ++i) {
+        EntityPayload& received_entity = s.entities[i];
+        for (uint32_t j = 0; j < ENTITY_COUNT; ++j) {
+            if (entities[j].id != received_entity.id) continue;
+
+            entities[j].exists = true;
+            entities[j].pos = received_entity.pos;
+        }
+    }
+}
+
+void on_state_received(GameStatePayload &&s) {
+    buffered_states_mtx.lock();
+
+    // Simulation is too late, ditch the oldest state
+    if (buffered_states.size() >= MAX_BUFFERED_STATES) {
+        buffered_states.pop();
+    }
+
+    buffered_states.push(std::move(s));
+
+    buffered_states_mtx.unlock();
 }
 
 void common_init() {
@@ -215,18 +264,31 @@ void host_update(float dt) {
         entities[i].pos.x += ceil((int)(entities[i].dir_x * 200.f * dt));
         entities[i].pos.y += ceil((int)(entities[i].dir_y * 200.f * dt));
 
-        if (entities[i].pos.x >= 800 || entities[i].pos.x <= 0) {
+        if (entities[i].pos.x >= WIN_WIDTH || entities[i].pos.x <= 0) {
             entities[i].dir_x *= -1;
         }
-        if (entities[i].pos.y >= 450 || entities[i].pos.y <= 0) {
+        if (entities[i].pos.y >= WIN_HEIGHT || entities[i].pos.y <= 0) {
             entities[i].dir_y *= -1;
         }
     }
 
-    try_send_network_packets();
+    try_send_network_packets(dt);
 }
 
-void client_update(float _dt) { process_client_inputs(); }
+void client_update(float dt) { 
+    process_client_inputs();
+
+    if (buffered_states.size() > 0) {
+        buffered_states_mtx.lock();
+        GameStatePayload& target_state = buffered_states.front();
+#ifdef NO_NET_INTERP
+        apply_game_state(target_state);    
+#else
+        interp_to_game_state(target_state, dt);
+#endif
+        buffered_states_mtx.unlock();
+    }
+}
 
 void run_game(bool host_mode) {
 
@@ -243,7 +305,7 @@ void run_game(bool host_mode) {
     if (host_mode) {
         host_init();
     }
-
+    
     while (!WindowShouldClose()) {
         float dt = GetFrameTime();
 
