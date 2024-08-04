@@ -1,7 +1,11 @@
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <format>
 #include <print>
+#include <utility>
+#include <memory>
 #include <sys/_types/_socklen_t.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -22,6 +26,50 @@ static Host host = {};
 
 void stop_net() {
     net_task_running = false;
+}
+
+size_t serialize_game_state(char* buff, size_t buff_len, const GameStatePayload& payload) {
+    assert(buff_len > sizeof payload && format("Provided buffer length is guaranteed to not fit a minimal game state payload. {} {}", __FILE__, __LINE__).c_str());
+
+    size_t offset = 0;
+    memcpy(buff + offset, &payload.player_pos, sizeof payload.player_pos);
+    offset = sizeof payload.player_pos;
+
+    memcpy(buff + offset, &payload.player_angle, sizeof payload.player_angle);
+    offset += sizeof payload.player_angle;
+
+    memcpy(buff + offset, &payload.num_entities, sizeof payload.num_entities);
+    offset += sizeof payload.num_entities;
+
+    assert(buff_len - offset >= sizeof(EntityPayload) * payload.num_entities && format("Provided buffer is too small to fit all entities. {} {}", __FILE__, __LINE__).c_str());
+
+    for (size_t i = 0; i < payload.num_entities; ++i) {
+        memcpy(buff + offset, payload.entities.get() + i, sizeof(EntityPayload));
+        offset += sizeof(EntityPayload);
+    }
+
+    return offset;
+}
+
+void deserialize_game_state(char* msg, size_t msg_len, GameStatePayload& game_state) {
+    size_t offset = 0;
+    memcpy(&game_state.player_pos, msg, sizeof game_state.player_pos);
+    offset += sizeof game_state.player_pos;
+
+    memcpy(&game_state.player_angle, msg + offset, sizeof game_state.player_angle);
+    offset += sizeof game_state.player_angle;
+
+    memcpy(&game_state.num_entities, msg + offset, sizeof game_state.num_entities);
+    offset += sizeof game_state.num_entities;
+
+    assert(msg_len - offset >= sizeof(EntityPayload) * game_state.num_entities && "Provided message is too small to fit all entities."); 
+
+    game_state.entities = unique_ptr<EntityPayload[]>(new EntityPayload[game_state.num_entities]);
+    for (size_t i = 0; i < game_state.num_entities; ++i) {
+        //WARN: fine for now, will break if we introduce dynamic array data in EntityPayload
+        memcpy(game_state.entities.get() + i, msg + offset, sizeof(EntityPayload));
+        offset += sizeof(EntityPayload);
+    }
 }
 
 int start_host() {
@@ -83,13 +131,6 @@ int start_host() {
                     .fd = client_fd,
                 };
             }
-
-            if (send(client_fd, "Hello friend", 13, 0) < 0) {
-                println("Failed to send greetings");
-            }
-
-            println("Successfully sent greeting");
-
         }
    }
     
@@ -115,27 +156,28 @@ int start_client() {
 
     char buff[2048];
     while(net_task_running) {
-        int msg_len = recv(server_fd, &buff, sizeof(buff), 0);
+        int msg_len = recv(server_fd, &buff, 2048, 0);
         if (msg_len < 0) {
             println("Failed to read from server");
             return -1;
         }
-
+        
         GameStatePayload received_state;
-        memcpy(&received_state, buff, msg_len);
-        on_state_received(received_state);
+        deserialize_game_state(buff, msg_len, received_state);
+        on_state_received(std::move(received_state));
     }
    
     return 0;
 }
 
-void send_game_state(const GameStatePayload *game_state) {
-    assert(game_state != nullptr);
+void send_game_state(const GameStatePayload& game_state) {
+    char buff[2048];
+    size_t serialized_len = serialize_game_state(buff, 2048, game_state);
 
     for (int i = 0; i < num_clients; ++i) {
         int fd = clients[i].fd;
 
-        if (send(fd, game_state, sizeof(*game_state), 0) < 0) {
+        if (send(fd, buff, serialized_len, 0) < 0) {
             println("Failed to send game state to client {}", i);
         }
     }
